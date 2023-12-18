@@ -647,5 +647,4 @@ void Colour_lamps(){
 	for(uint8_t i=0; i<candle3;i++){candles[i+14]=candle3[i];}						 
 	for(uint8_t i=0; i<candle4;i++){candles[i+21]=candle4[i];}						 
 	for(uint8_t i=0; i<candle5;i++){candles[i+28]=candle5[i];}
-	candles[random8(0,NUMBER_OF_FLAMES-1)] = ColorFromPalette(col_palette, random8(),random8(150,255),LINEARBLEND); 
 }
