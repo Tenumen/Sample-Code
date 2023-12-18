@@ -1,0 +1,651 @@
+#include <FastLED.h>
+#include <RBD_Timer.h>
+
+//////////////////////////////////////////////
+//        RemoteXY include library          //
+//////////////////////////////////////////////
+
+// RemoteXY select connection mode and include library 
+#define REMOTEXY_MODE__ESP32CORE_WIFI_POINT
+#include <WiFi.h>
+
+#include <RemoteXY.h>
+
+// RemoteXY connection settings 
+#define REMOTEXY_WIFI_SSID "Front House Lights"
+#define REMOTEXY_WIFI_PASSWORD "12345678"
+#define REMOTEXY_SERVER_PORT 6377
+
+
+// RemoteXY configurate  
+#pragma pack(push, 1)
+uint8_t RemoteXY_CONF[] =   // 385 bytes
+  { 255,3,0,0,0,122,1,16,8,5,3,10,5,6,9,81,1,2,26,129,
+  0,16,8,11,6,1,37,82,101,100,0,129,0,16,16,14,6,1,247,82,
+  111,115,101,0,129,0,16,24,24,6,1,233,77,97,103,101,110,116,97,0,
+  129,0,16,32,16,6,1,218,86,105,111,108,101,116,0,129,0,16,40,12,
+  6,1,191,66,108,117,101,0,129,0,16,48,16,6,1,165,65,122,117,114,
+  101,0,129,0,16,56,36,6,1,122,83,112,114,105,110,103,71,114,101,101,
+  110,0,129,0,16,65,17,6,1,134,71,114,101,101,110,0,129,0,16,73,
+  18,6,1,94,89,101,108,108,111,119,0,129,0,16,81,21,6,1,2,79,
+  114,97,110,103,101,0,131,1,1,92,28,6,1,2,31,82,71,66,32,77,
+  111,100,101,0,131,0,31,92,29,6,2,2,31,67,117,115,116,111,109,32,
+  77,111,100,101,0,3,10,5,6,9,81,2,2,26,129,0,17,7,30,6,
+  2,17,82,71,66,32,77,111,100,101,0,129,0,17,15,18,6,2,17,65,
+  108,108,32,67,111,108,111,117,114,115,0,129,0,17,24,18,6,2,135,67,
+  104,114,105,115,116,109,97,115,0,129,0,17,32,18,6,2,36,72,97,108,
+  108,111,119,101,101,110,0,129,0,17,40,18,6,2,17,45,0,129,0,17,
+  48,18,6,2,17,45,0,129,0,17,56,18,6,2,17,45,0,129,0,17,
+  64,18,6,2,17,45,0,129,0,17,72,18,6,2,17,45,0,129,0,17,
+  80,2,6,2,17,45,0,2,1,46,5,13,5,0,134,26,31,31,79,78,
+  0,79,70,70,0,129,0,43,1,18,3,0,16,83,105,109,112,108,101,32,
+  77,111,100,101,0 };
+  
+// this structure defines all the variables and events of your control interface 
+struct {
+
+    // input variables
+  uint8_t colour_selection; // =0 if select position A, =1 if position B, =2 if position C, ... 
+  uint8_t custom_mode_select; // =0 if select position A, =1 if position B, =2 if position C, ... 
+  uint8_t simple_colour; // =1 if switch ON and =0 if OFF 
+
+    // other variable
+  uint8_t connect_flag;  // =1 if wire connected, else =0 
+
+} RemoteXY;
+#pragma pack(pop)
+
+/////////////////////////////////////////////
+//           END RemoteXY include          //
+/////////////////////////////////////////////
+
+
+//Light Sensor Data
+//#define light_switch_pin 5 //Tx
+#define photoresistor_pin 8 //A3
+ 
+RBD::Timer sensor_read_norm_1;
+RBD::Timer sensor_read_norm_2;
+int delay_sensor_read_norm = 10000;
+int light_raw;
+int darkness = 1900;
+int light = 2800;
+bool light_switch;
+bool darkness_state_1;
+bool darkness_state_2;
+bool darkness_state;
+
+//NeoPixel
+#define DATA_PIN1 A2              // Which pin are those Neopixels hook up to?
+#define LAMP1 7					//num LEDs in first lamp
+#define LAMP2 7
+#define LAMP3 7
+#define LAMP4 7
+#define LAMP5 7
+#define NUMBER_OF_FLAMES (LAMP1+LAMP2+LAMP3+LAMP4+LAMP5) // = Number of Lamps * groups of Neopixels. 16 NeoPixel ring, 12 NeoPixel ring, 7 NeoPixel Pad. So 5 lamps of 7 = 35. 
+#define BRIGHTNESS  100
+#define LAMP_SIZE 7
+uint8_t whichPalette;
+uint8_t numberOfPalettes;
+/*
+uint8_t LAMP1_LED_ED = LAMP_SIZE-1;
+uint8_t LAMP2_LED_ED = LAMP_SIZE*2-1;
+uint8_t LAMP3_LED_ED = LAMP_SIZE*3-1;
+uint8_t LAMP4_LED_ED = LAMP_SIZE*4-1;
+uint8_t LAMP5_LED_ED = NUMBER_OF_FLAMES-1;
+uint8_t LAMP1_LED_ST = 0;
+uint8_t LAMP2_LED_ST = LAMP_SIZE;
+uint8_t LAMP3_LED_ST = LAMP_SIZE*2;
+uint8_t LAMP4_LED_ST = LAMP_SIZE*3;
+uint8_t LAMP5_LED_ST = LAMP_SIZE*4;
+*/
+
+
+int fade_to_black = 1;
+
+// Define the array of leds
+CRGB candles[NUMBER_OF_FLAMES];
+CRGB candle1[LAMP1];  //0-6
+CRGB candle2[LAMP2];  //7-13
+CRGB candle3[LAMP3];  //14-20
+CRGB candle4[LAMP4];  //21-27
+CRGB candle5[LAMP5];  //28-35
+
+//COLOUR PALLETTES//////////////////////////////////////
+
+/*
+  DEFINE_GRADIENT_PALETTE(flamecolorsYellow){
+	0,255,255,0,  //yellow
+	115,255,180,0,  //orange
+	150,210,255,0,    //greenwashed yellow
+	255,255,255,0  //yellow	 
+ };
+  DEFINE_GRADIENT_PALETTE(flamecolorsOrange){
+	0,255,125,0,  //orange
+	115,255,30,0,  //reddish
+	150,255,170,0,    //yellowish
+	255,255,125,0  //orange
+ };
+ DEFINE_GRADIENT_PALETTE(flamecolorsRed){
+	0,255,0,0,  //red
+	115,255,50,0,  //dark orange
+	150,255,0,50,    //pink
+	255,255,0,0  //red
+	// remember to set range to 255 not 100. Multiply by 2.55. 
+ };
+ DEFINE_GRADIENT_PALETTE(flamecolorsRose){
+	0,255,0,125,  //rose
+	115,255,0,180,  //magenta
+	150,255,0,0,    //red
+	255,255,0,125  //rose	 	 
+  };
+  DEFINE_GRADIENT_PALETTE(flamecolorsMagenta){
+	0,255,0,255,  //magenta
+	115,255,0,180,  //rose
+	150,180,0,255,    //violet
+	255,255,0,255  //magenta	 	 
+	 
+ }; 
+   DEFINE_GRADIENT_PALETTE(flamecolorsViolet){
+	0,125,0,255,  //violet
+	115,180,0,255,  //Magenta
+	150,40,0,255,    //blue
+	255,125,255,0  //violet	 	 
+	 
+ }; 
+   DEFINE_GRADIENT_PALETTE(flamecolorsBlue){
+	0,0,0,255,  //blue
+	115,80,0,255,  //violet
+	150,0,70,255,    //azure
+	255,0,0,255  //blue	 	 
+	 
+ };
+ DEFINE_GRADIENT_PALETTE(flamecolorsAzure){
+	0,0,125,255,  //azure
+	115,0,0,255,  //blue
+	150,0,255,256,    //cyan
+	255,0,125,255  //azure	 	 
+	 
+ };
+ DEFINE_GRADIENT_PALETTE(flamecolorsCyan){
+	0,0,255,255,  //cyan
+	115,0,125,255,  //azure
+	150,0,255,125,    //turquoise
+	255,0,255,255  //cyan	 	 
+	 
+ };
+   DEFINE_GRADIENT_PALETTE(flamecolorsTurquoise){
+	0,0,255,125,  //turquoise
+	115,0,255,255,  //cyan
+	150,0,255,0,    //green
+	255,0,255,125  //turquoise	 	 
+	 
+ };
+  DEFINE_GRADIENT_PALETTE(flamecolorsGreen){
+	0,0,255,0,  //green
+	115,0,255,125,  //turquoise
+	150,125,255,0,    //spring-green
+	255,0,255,0  //green	 	 
+	 
+ };
+   DEFINE_GRADIENT_PALETTE(flamecolorsSpringGreen){
+	0,125,255,0,  //spring-green
+	115,25,255,0,  //green
+	150,255,200,0,    //yellowish
+	255,125,255,0  //spring-green	 	 
+	 
+ };
+   DEFINE_GRADIENT_PALETTE(flamecolorsChristmas){
+	0,255,255,0,  //green
+	85,255,180,0,  //white
+	170,210,255,0,    //red
+	255,255,255,0  //green	 	 
+	 
+ };
+   DEFINE_GRADIENT_PALETTE(flamecolorsHalloween){
+	0,255,255,0,  //orange
+	85,255,180,0,  //violet
+	170,210,255,0,    //ywllow
+	255,255,255,0  //orange	 	 
+	 
+ };
+    DEFINE_GRADIENT_PALETTE(flamecolorsWhite){
+	0,150,150,150,  //orange
+	85,180,180,180,  //violet
+	170,150,150,150,    //ywllow
+	255,150,150,150  //orange	 	 
+ 
+ };
+*/
+
+const TProgmemRGBPalette16 flamecolorsWhite FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsRed FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsRose FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsMagenta FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsViolet FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsBlue FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsAzure FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsCyan FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsTurquoise FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsGreen FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsSpringGreen FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsYellow FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+const TProgmemRGBPalette16 flamecolorsOrange FL_PROGMEM =
+{
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey, 
+CRGB::Grey, CRGB::Grey, CRGB::Grey, CRGB::Grey 
+};
+
+// Add or remove palette names from this list to control which color
+// palettes are used, and in what order.
+const TProgmemRGBPalette16* RainbowPaletteList[] = {
+  &flamecolorsWhite,
+/*  &flamecolorsRed,
+  &flamecolorsOrange,
+  &flamecolorsYellow,
+  &flamecolorsSpringGreen,
+  &flamecolorsGreen,
+  &flamecolorsTurquoise,
+  &flamecolorsCyan,
+  &flamecolorsBlue,
+  &flamecolorsViolet,
+  &flamecolorsRose,
+  &flamecolorsMagenta,
+  */
+};
+const TProgmemRGBPalette16* ChristmasPaletteList[] = {
+  &flamecolorsWhite,
+//  &flamecolorsRed,
+//  &flamecolorsGreen,
+};
+
+const TProgmemRGBPalette16* HalloweenPaletteList[] = {
+//  &flamecolorsOrange,
+//  &flamecolorsRed,
+//  &flamecolorsYellow,
+};
+  
+ CRGBPalette16 col_palette;  //used when all lamps the same colour blend
+ CRGBPalette16 col_palette1; //used for lamp 1
+ CRGBPalette16 col_palette2;
+ CRGBPalette16 col_palette3;
+ CRGBPalette16 col_palette4;
+ CRGBPalette16 col_palette5;
+ 
+  ///////////////////////////////////////
+
+void setup() {
+  pinMode(photoresistor_pin, INPUT);    // Set the switch pin as input 
+//  pinMode(light_switch_pin, INPUT);  
+  
+  RemoteXY_Init (); 
+  delay(3000); // sets a delay to insure that everything has initalized before proceeding with the setup
+  Serial.begin(57600);           // Set up serial communication at 57600
+
+  Serial.println("STARTUP");
+  FastLED.addLeds<WS2812B,DATA_PIN1,GRB>(candles,NUMBER_OF_FLAMES);
+  FastLED.setBrightness(BRIGHTNESS); 
+ 
+  sensor_read_norm_1.setTimeout(delay_sensor_read_norm);
+  sensor_read_norm_1.restart();
+  sensor_read_norm_2.setTimeout(delay_sensor_read_norm);
+  delay(delay_sensor_read_norm/2);
+  sensor_read_norm_2.restart();
+  col_palette = flamecolorsRed;
+    
+}
+
+void loop() {
+    RemoteXY_Handler ();
+	Daylight_check();
+
+EVERY_N_MILLISECONDS(50){
+	if(RemoteXY.simple_colour == 1){  //simple colours only
+		
+			if (RemoteXY.colour_selection == 0) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Red);
+			}
+			if (RemoteXY.colour_selection == 1) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::DeepPink);
+			}
+			if (RemoteXY.colour_selection == 2) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Magenta);
+			}
+			if (RemoteXY.colour_selection == 3) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Purple);
+			}		  
+			if (RemoteXY.colour_selection == 4) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Blue);
+			}
+			if (RemoteXY.colour_selection == 5) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Cyan);
+			}		    
+			if (RemoteXY.colour_selection == 6) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Chartreuse);
+			}
+			if (RemoteXY.colour_selection == 7) {	
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Green);			
+			}		    
+			if (RemoteXY.colour_selection == 8) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Yellow);
+			}		   
+			if (RemoteXY.colour_selection == 9) {
+				fill_solid(candles,NUMBER_OF_FLAMES,CRGB::Orange);
+			}
+		FastLED.setBrightness(BRIGHTNESS); 
+	}
+	else{
+	
+		if(darkness_state==0){
+			if (RemoteXY.custom_mode_select == 0){  //colour palettes selected from page 1
+
+				     if (RemoteXY.colour_selection == 0) {
+						col_palette = flamecolorsRed;
+					  }
+					  if (RemoteXY.colour_selection == 1) {
+  						col_palette = flamecolorsRose;
+
+					  }
+					  if (RemoteXY.colour_selection == 2) {
+  						col_palette = flamecolorsMagenta;
+
+					  }
+					  if (RemoteXY.colour_selection == 3) {
+  						col_palette = flamecolorsViolet;
+
+					  }
+					  if (RemoteXY.colour_selection == 4) {
+						col_palette = flamecolorsBlue;
+
+					  }
+					  if (RemoteXY.colour_selection == 5) {
+  						 col_palette = flamecolorsAzure;
+
+					  }
+					  if (RemoteXY.colour_selection == 6) {
+						col_palette = flamecolorsSpringGreen;
+
+					  }
+					  if (RemoteXY.colour_selection == 7) {
+						 col_palette = flamecolorsGreen;
+
+					  }
+					  if (RemoteXY.colour_selection == 8) {
+ 						 col_palette = flamecolorsYellow;
+
+					  }
+					  if (RemoteXY.colour_selection == 9) {
+  						 col_palette = flamecolorsOrange;
+
+					  }
+					  else  {
+					  }
+					  
+					//set new LED colour and brightness.
+					candles[random8(0,NUMBER_OF_FLAMES-1)] = ColorFromPalette(col_palette, random8(),random8(150,255),LINEARBLEND); //random LED select, random colour from preset palette, random brightness.  
+				}
+			else{   //colours palettes selected from page 2 -to do later
+				
+				     if (RemoteXY.colour_selection == 0) {
+						 
+						EVERY_N_SECONDS(5);{
+						 //set multiple colour palettes at random
+ 						numberOfPalettes = sizeof(RainbowPaletteList) / sizeof(RainbowPaletteList[0]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette1 = *(RainbowPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette2 = *(RainbowPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette3 = *(RainbowPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette4 = *(RainbowPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette5 = *(RainbowPaletteList[whichPalette]);
+						}
+ 
+						Colour_lamps();
+						 
+
+					  }
+					  if (RemoteXY.colour_selection == 1) {
+						 EVERY_N_SECONDS(5);{
+						 //set multiple colour palettes at random
+ 						numberOfPalettes = sizeof(ChristmasPaletteList) / sizeof(ChristmasPaletteList[0]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette1 = *(ChristmasPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette2 = *(ChristmasPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette3 = *(ChristmasPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette4 = *(ChristmasPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette5 = *(ChristmasPaletteList[whichPalette]);
+						}
+ 
+						Colour_lamps();
+
+					  }
+					  if (RemoteXY.colour_selection == 2) {
+  						EVERY_N_SECONDS(5);{
+						 //set multiple colour palettes at random
+ 						numberOfPalettes = sizeof(HalloweenPaletteList) / sizeof(HalloweenPaletteList[0]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette1 = *(HalloweenPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette2 = *(HalloweenPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette3 = *(HalloweenPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette4 = *(HalloweenPaletteList[whichPalette]);
+						whichPalette = random8(0,numberOfPalettes); 
+						col_palette5 = *(HalloweenPaletteList[whichPalette]);
+						}
+ 
+						Colour_lamps();
+
+					  }
+					  if (RemoteXY.colour_selection == 3) {
+  						CRGBPalette16 col_palette = flamecolorsViolet;
+
+					  }
+					  if (RemoteXY.colour_selection == 4) {
+						CRGBPalette16 col_palette = flamecolorsBlue;
+
+					  }
+					  if (RemoteXY.colour_selection == 5) {
+  						 CRGBPalette16 col_palette = flamecolorsAzure;
+
+					  }
+					  if (RemoteXY.colour_selection == 6) {
+						CRGBPalette16 col_palette = flamecolorsSpringGreen;
+
+					  }
+					  if (RemoteXY.colour_selection == 7) {
+						 CRGBPalette16 col_palette = flamecolorsGreen;
+
+					  }
+					  if (RemoteXY.colour_selection == 8) {
+ 						 CRGBPalette16 col_palette = flamecolorsYellow;
+
+					  }
+					  if (RemoteXY.colour_selection == 9) {
+  						 CRGBPalette16 col_palette = flamecolorsOrange;
+
+					  }
+					  else  {
+					  }
+					  
+				}
+		    fadeToBlackBy(candles,NUMBER_OF_FLAMES,fade_to_black);
+			}
+		else{  //turn off
+			FastLED.clear();
+			}
+		}
+	}
+   FastLED.show();
+} 
+
+void Daylight_check(){
+  //read sensors and convert ------------------------------------- 
+	if(sensor_read_norm_1.isExpired())
+		{
+		sensor_read_norm_1.restart();
+		light_raw=analogRead(photoresistor_pin);
+		Serial.println(light_raw);		
+//		light_switch=digitalRead(light_switch_pin);
+//		Serial.print("lightswitch = ");
+//		Serial.println(light_switch);
+		
+		
+		if(light_raw<=light)
+			{
+			darkness_state_1 = 0;  //0 is night, 1 = day
+			}
+		else if(light_raw>=darkness)
+			{
+			darkness_state_1=1;
+			}
+		else
+			{
+			}
+		
+		Serial.print("darkness_state_1 = ");
+		Serial.println(darkness_state_1);
+		}
+		
+	if(sensor_read_norm_2.isExpired())
+		{
+		sensor_read_norm_2.restart();
+		light_raw=analogRead(photoresistor_pin);
+		Serial.println(light_raw);	
+//		light_switch=digitalRead(light_switch_pin);
+//		Serial.print("lightswitch = ");
+//		Serial.println(light_switch);
+
+		
+		if(light_raw<=light)
+			{
+			darkness_state_2 = 0;
+			}
+		else if(light_raw>=darkness)
+			{
+			darkness_state_2=1;
+			}
+		else
+			{
+			}
+		Serial.print("darkness_state_2 = ");
+		Serial.println(darkness_state_2);
+
+			if(darkness_state_1==darkness_state_2) //true if both reads say its dark or both say it's light
+				{
+				 if(darkness_state_1==1) //true if day
+				 {
+					 darkness_state=1;
+				 }
+				 else{
+					 darkness_state=0;
+				 }		 
+				 }
+				 else{
+				 }
+		 
+		Serial.print("darkness_state = ");
+		Serial.println(darkness_state);
+	
+			}
+			
+}
+
+void Colour_lamps(){
+	//colour lamp LEDS
+	candle1[random8(0,LAMP1-1)] = ColorFromPalette(col_palette1, random8(),random8(150,255),LINEARBLEND); 						 
+	candle2[random8(0,LAMP1-1)] = ColorFromPalette(col_palette2, random8(),random8(150,255),LINEARBLEND); 
+	candle3[random8(0,LAMP1-1)] = ColorFromPalette(col_palette3, random8(),random8(150,255),LINEARBLEND); 
+	candle4[random8(0,LAMP1-1)] = ColorFromPalette(col_palette4, random8(),random8(150,255),LINEARBLEND); 
+	candle5[random8(0,LAMP1-1)] = ColorFromPalette(col_palette5, random8(),random8(150,255),LINEARBLEND); 						
+						 
+	//copy individual candle1+ to candles
+	for(uint8_t i=0; i<candle1;i++){candles[i]=candle1[i];}
+	for(uint8_t i=0; i<candle2;i++){candles[i+7]=candle2[i];}						 
+	for(uint8_t i=0; i<candle3;i++){candles[i+14]=candle3[i];}						 
+	for(uint8_t i=0; i<candle4;i++){candles[i+21]=candle4[i];}						 
+	for(uint8_t i=0; i<candle5;i++){candles[i+28]=candle5[i];}
+	candles[random8(0,NUMBER_OF_FLAMES-1)] = ColorFromPalette(col_palette, random8(),random8(150,255),LINEARBLEND); 
+}
